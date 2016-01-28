@@ -11,6 +11,69 @@ module FogDriver
         compute_options[:openstack_username]
       end
 
+      def create_winrm_transport(machine_spec, machine_options, server)
+        remote_host = if machine_spec.reference['use_private_ip_for_ssh']
+                        server.private_ip_address
+                      elsif !server.public_ip_address
+                        Chef::Log.warn("Server #{machine_spec.name} has no public ip address.  Using private ip '#{server.private_ip_address}'.  Set driver option 'use_private_ip_for_ssh' => true if this will always be the case ...")
+                        server.private_ip_address
+                      elsif server.public_ip_address
+                        server.public_ip_address
+                      else
+                        fail "Server #{server.id} has no private or public IP address!"
+                      end
+        Chef::Log::info("Connecting to server #{remote_host}")
+
+        port = machine_spec.reference['winrm_port'] || 5985
+        endpoint = "http://#{remote_host}:#{port}/wsman"
+        type = :plaintext
+        pem_bytes = private_key_for(machine_spec, machine_options, server)
+        encrypted_admin_password = wait_for_admin_password(machine_spec)
+        decoded = Base64.decode64(encrypted_admin_password)
+        private_key = OpenSSL::PKey::RSA.new(pem_bytes)
+        decrypted_password = private_key.private_decrypt decoded
+
+
+        # Use basic HTTP auth - this is required for the WinRM setup we
+        # are using
+        # TODO: Improve that.
+        options = {
+            :user => machine_spec.reference['winrm.username'] || 'Admin',
+            :pass => decrypted_password,
+            :disable_sspi => false,
+            :basic_auth_only => true
+        }
+
+        Chef::Provisioning::Transport::WinRM.new(endpoint, type, options, {})
+      end
+
+      # Wait for the Windows Admin password to become available
+      # @param [Hash] machine_spec Machine spec data
+      # @return [String] encrypted admin password
+      def wait_for_admin_password(machine_spec)
+        time_elapsed = 0
+        sleep_time = 10
+        max_wait_time = 900 # 15 minutes
+        encrypted_admin_password = nil
+        instance_id = machine_spec.location['server_id']
+
+
+        Chef::Log.info "waiting for #{machine_spec.name}'s admin password to be available..."
+        while time_elapsed < max_wait_time && encrypted_admin_password.nil?
+          response = compute.get_server_password(instance_id)
+          encrypted_admin_password = response.body['password']
+          if encrypted_admin_password.nil?
+            Chef::Log.info "#{time_elapsed}/#{max_wait_time}s elapsed -- sleeping #{sleep_time} seconds for #{machine_spec.name}'s admin password."
+            sleep(sleep_time)
+            time_elapsed += sleep_time
+          end
+        end
+
+        Chef::Log.info "#{machine_spec.name}'s admin password is available!'"
+
+        encrypted_admin_password
+      end
+
       def self.compute_options_for(provider, id, config)
         new_compute_options = {}
         new_compute_options[:provider] = provider
