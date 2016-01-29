@@ -24,9 +24,9 @@ module FogDriver
                       end
         Chef::Log::info("Connecting to server #{remote_host}")
 
-        port = machine_spec.reference['winrm_port'] || 5985
-        endpoint = "http://#{remote_host}:#{port}/wsman"
-        type = :plaintext
+        port = machine_spec.reference['winrm_port'] || 5986
+        endpoint = "https://#{remote_host}:#{port}/wsman"
+        type = :ssl
         pem_bytes = private_key_for(machine_spec, machine_options, server)
         encrypted_admin_password = wait_for_admin_password(machine_spec)
         decoded = Base64.decode64(encrypted_admin_password)
@@ -34,14 +34,16 @@ module FogDriver
         decrypted_password = private_key.private_decrypt decoded
 
 
-        # Use basic HTTP auth - this is required for the WinRM setup we
+        # Use basic HTTPS auth - this is required for the WinRM setup we
         # are using
         # TODO: Improve that.
         options = {
             :user => machine_spec.reference['winrm.username'] || 'Admin',
             :pass => decrypted_password,
-            :disable_sspi => false,
-            :basic_auth_only => true
+            :disable_sspi => true,
+            :basic_auth_only => true,
+            :no_ssl_peer_verification=>true,
+            :ca_trust_path=>nil
         }
 
         Chef::Provisioning::Transport::WinRM.new(endpoint, type, options, {})
