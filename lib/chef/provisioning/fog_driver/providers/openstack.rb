@@ -59,10 +59,10 @@ module FogDriver
 
 
         Chef::Log.info "waiting for #{machine_spec.name}'s admin password to be available..."
-        while time_elapsed < max_wait_time && encrypted_admin_password.nil?
+        while time_elapsed < max_wait_time && encrypted_admin_password.nil? || encrypted_admin_password.empty?
           response = compute.get_server_password(instance_id)
           encrypted_admin_password = response.body['password']
-          if encrypted_admin_password.nil?
+          if encrypted_admin_password.nil? || encrypted_admin_password.empty?
             Chef::Log.info "#{time_elapsed}/#{max_wait_time}s elapsed -- sleeping #{sleep_time} seconds for #{machine_spec.name}'s admin password."
             sleep(sleep_time)
             time_elapsed += sleep_time
